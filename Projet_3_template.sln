@@ -1,31 +1,214 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.9.34701.34
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Projet_3_template", "Projet_3_template\Projet_3_template.vcxproj", "{849810CC-4E9C-43E6-9C65-63F32857B9B8}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|x64 = Debug|x64
-		Debug|x86 = Debug|x86
-		Release|x64 = Release|x64
-		Release|x86 = Release|x86
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Debug|x64.ActiveCfg = Debug|x64
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Debug|x64.Build.0 = Debug|x64
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Debug|x86.ActiveCfg = Debug|Win32
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Debug|x86.Build.0 = Debug|Win32
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Release|x64.ActiveCfg = Release|x64
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Release|x64.Build.0 = Release|x64
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Release|x86.ActiveCfg = Release|Win32
-		{849810CC-4E9C-43E6-9C65-63F32857B9B8}.Release|x86.Build.0 = Release|Win32
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {4BE0D4FB-5FBF-4174-A2BB-B1EC3AA97D4D}
-	EndGlobalSection
-EndGlobal
+#include <SFML/Graphics.hpp>
+#include <vector>
+#include <memory>
+
+// Dimensions de la fenêtre
+const int WINDOW_WIDTH = 800;
+const int WINDOW_HEIGHT = 600;
+const int MAX_BALLS = 3;
+const int PADDLE_Y_OFFSET = 550;
+const int BRICK_ROWS = 5;
+const int BRICK_COLUMNS = 12;
+const float BRICK_SPACING = 5.f;
+const float PADDLE_SPEED = 250.f;
+
+// Composants
+struct PositionComponent {
+    sf::Vector2f position;
+};
+
+struct VelocityComponent {
+    sf::Vector2f velocity;
+};
+
+struct RenderableComponent {
+    std::shared_ptr<sf::Shape> shape;
+};
+
+// Structure d'entité avec des composants optionnels
+struct Entity {
+    int id;
+    std::unique_ptr<PositionComponent> position;
+    std::unique_ptr<VelocityComponent> velocity;
+    std::unique_ptr<RenderableComponent> renderable;
+
+    Entity() = default;
+    Entity(const Entity&) = delete;
+    Entity& operator=(const Entity&) = delete;
+    Entity(Entity&&) = default;
+    Entity& operator=(Entity&&) = default;
+};
+
+// Systèmes
+void updatePositions(std::vector<Entity>& entities, float deltaTime) {
+    for (auto& entity : entities) {
+        if (entity.position && entity.velocity) {
+            entity.position->position += entity.velocity->velocity * deltaTime;
+            entity.renderable->shape->setPosition(entity.position->position);
+
+            // Vérifier les collisions avec les bords de la fenêtre pour les balles
+            float radius = dynamic_cast<sf::CircleShape*>(entity.renderable->shape.get())->getRadius();
+            if (entity.position->position.x - radius < 0) {  // Bord gauche
+                entity.velocity->velocity.x = -entity.velocity->velocity.x;
+                entity.position->position.x = radius;
+            }
+            else if (entity.position->position.x + radius > WINDOW_WIDTH) {  // Bord droit
+                entity.velocity->velocity.x = -entity.velocity->velocity.x;
+                entity.position->position.x = WINDOW_WIDTH - radius;
+            }
+
+            if (entity.position->position.y - radius < 0) {  // Bord supérieur
+                entity.velocity->velocity.y = -entity.velocity->velocity.y;
+                entity.position->position.y = radius;
+            }
+        }
+    }
+}
+
+void handleCollisions(std::vector<Entity>& balls, Entity& paddle, std::vector<Entity>& bricks) {
+    // Collision Paddle-Ball
+    for (auto& ball : balls) {
+        if (ball.position && ball.velocity && ball.renderable) {
+            if (ball.renderable->shape->getGlobalBounds().intersects(paddle.renderable->shape->getGlobalBounds())) {
+                ball.velocity->velocity.y = -ball.velocity->velocity.y;
+                ball.position->position.y = paddle.position->position.y - ball.renderable->shape->getGlobalBounds().height;
+            }
+        }
+    }
+
+    // Collision Ball-Brick
+    for (auto& ball : balls) {
+        for (auto it = bricks.begin(); it != bricks.end();) {
+            if (ball.renderable->shape->getGlobalBounds().intersects((*it).renderable->shape->getGlobalBounds())) {
+                ball.velocity->velocity.y = -ball.velocity->velocity.y;
+                it = bricks.erase(it);
+            }
+            else {
+                ++it;
+            }
+        }
+    }
+}
+
+void renderEntities(sf::RenderWindow& window, const std::vector<Entity>& entities) {
+    for (const auto& entity : entities) {
+        if (entity.renderable) {
+            window.draw(*entity.renderable->shape);
+        }
+    }
+}
+
+// Création d'une entité Balle
+Entity createBall() {
+    Entity ball;
+    ball.id = rand();
+    ball.position = std::make_unique<PositionComponent>(PositionComponent{ sf::Vector2f(WINDOW_WIDTH / 2.f, WINDOW_HEIGHT / 2.f) });
+    ball.velocity = std::make_unique<VelocityComponent>(VelocityComponent{ sf::Vector2f(200.f, -200.f) });
+    ball.renderable = std::make_unique<RenderableComponent>();
+    ball.renderable->shape = std::make_shared<sf::CircleShape>(15.f);
+    ball.renderable->shape->setFillColor(sf::Color::Red);
+    ball.renderable->shape->setOrigin(15.f, 15.f);
+    ball.renderable->shape->setPosition(ball.position->position);
+    return ball;
+}
+
+// Création d'une entité Raquette
+Entity createPaddle() {
+    Entity paddle;
+    paddle.id = rand();
+    paddle.position = std::make_unique<PositionComponent>(PositionComponent{ sf::Vector2f(WINDOW_WIDTH / 2.f - 60.f, PADDLE_Y_OFFSET) });
+    paddle.renderable = std::make_unique<RenderableComponent>();
+    paddle.renderable->shape = std::make_shared<sf::RectangleShape>(sf::Vector2f(120.f, 20.f));
+    paddle.renderable->shape->setFillColor(sf::Color::Blue);
+    paddle.renderable->shape->setPosition(paddle.position->position);
+    return paddle;
+}
+
+// Création des entités Briques
+std::vector<Entity> createBricks() {
+    std::vector<Entity> bricks;
+    for (int row = 0; row < BRICK_ROWS; ++row) {
+        for (int col = 0; col < BRICK_COLUMNS; ++col) {
+            Entity brick;
+            brick.id = rand();
+            brick.position = std::make_unique<PositionComponent>(PositionComponent{ sf::Vector2f(col * (62.f + BRICK_SPACING), row * (20.f + BRICK_SPACING)) });
+            brick.renderable = std::make_unique<RenderableComponent>();
+            brick.renderable->shape = std::make_shared<sf::RectangleShape>(sf::Vector2f(62.f, 20.f));
+            brick.renderable->shape->setFillColor(sf::Color::Green);
+            brick.renderable->shape->setPosition(brick.position->position);
+            bricks.push_back(std::move(brick));
+        }
+    }
+    return bricks;
+}
+
+int main() {
+    sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Casse-briques");
+    window.setFramerateLimit(60);
+
+    std::vector<Entity> balls;
+    balls.push_back(createBall());
+    Entity paddle = createPaddle();
+    std::vector<Entity> bricks = createBricks();
+
+    sf::Clock clock;
+    bool gameOver = false;
+    int ballsAtBottom = 0;
+    bool spacePressed = false;
+
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) {
+                window.close();
+            }
+        }
+
+        float deltaTime = clock.restart().asSeconds();
+
+        if (!gameOver) {
+            bool moveLeft = sf::Keyboard::isKeyPressed(sf::Keyboard::Left);
+            bool moveRight = sf::Keyboard::isKeyPressed(sf::Keyboard::Right);
+
+            if (moveLeft && paddle.position->position.x > 0)
+                paddle.position->position.x -= PADDLE_SPEED * deltaTime;
+            if (moveRight && paddle.position->position.x + 120.f < WINDOW_WIDTH)
+                paddle.position->position.x += PADDLE_SPEED * deltaTime;
+            paddle.renderable->shape->setPosition(paddle.position->position);
+
+            updatePositions(balls, deltaTime);
+            handleCollisions(balls, paddle, bricks);
+
+            if (bricks.empty()) {
+                gameOver = true;  // Fin du jeu si toutes les briques sont détruites
+            }
+
+            for (auto& ball : balls) {
+                if (ball.position->position.y > WINDOW_HEIGHT) {
+                    ball.position->position = { WINDOW_WIDTH / 2.f, WINDOW_HEIGHT / 2.f };
+                    ball.velocity->velocity = { 200.f, -200.f };
+                    ballsAtBottom++;
+                    if (ballsAtBottom >= MAX_BALLS) {
+                        gameOver = true;
+                    }
+                }
+            }
+
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space) && !spacePressed && balls.size() < MAX_BALLS) {
+                balls.push_back(createBall());
+                spacePressed = true;
+            }
+            else if (!sf::Keyboard::isKeyPressed(sf::Keyboard::Space)) {
+                spacePressed = false;
+            }
+        }
+
+        window.clear(sf::Color::Black);
+        renderEntities(window, bricks);
+        renderEntities(window, balls);
+        window.draw(*paddle.renderable->shape);
+        window.display();
+    }
+
+    return 0;
+}
